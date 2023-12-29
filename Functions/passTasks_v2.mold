@@ -1,0 +1,53 @@
+function [t2a, numPass] = passTasks_v2(t2a, agents, tasks, simTh, numPass, agdistmat)
+%This function performs reorganization of which agent works on which task. This is version 2 because in the old version weird things could happen. For
+%example if Agent A was working on Task 1 and Agent B was working on Task 2 and both of them were stuck, they could not exchange tasks, since they
+%were both showing up as busy for the other agent.
+%
+%Usage: [Task2Agent, NumberOfPasses] = pasTasks(Task2Agent, Agents, Tasks, SimilarityThreshold, NumberOfPasses)
+%
+
+%% Perform pass calculation
+
+activeTasks = find(not(isnan(t2a)));
+agFit  = cell(numel(t2a), 1);
+simAgs = cell(numel(t2a), 1);
+
+% First, for each active task evaluate how good agents are in solving them, taking into account communication
+for tidx = activeTasks
+
+    %Check if task was not passed too many times and allow further pass-evaluation only if passes are still allowed
+    if numPass(tidx) > 0
+
+        %Who is similar enough to be worthy for communication? -- asked the agent working on task tidx?
+        simAgs{tidx} = find(agdistmat(t2a(tidx), :) < simTh);
+
+        %Calculate how good all these friends are in solving task tidx
+        agFit{tidx} = CalcSolvFitness(agents(simAgs{tidx}, :), tasks(tidx, :));
+    end
+end
+
+%Convert simAgs and agFit to matrices for faster computation
+simAgs = padcat(simAgs{:});
+agFit  = padcat(agFit{:})';
+
+% Second, assign agents to tasks, based on how much real work they can do. First assign the one that can do the most, ... until all tasks have an agent
+while ~isempty(activeTasks)
+    mostWork = min(cellfun(@min, agFit(activeTasks))); %This is the most work that could be done in the next step
+    tmp = cellfun(@(x) x == mostWork, agFit, 'UniformOutput', false); %Helpr var storing where this max is
+    for tidx = activeTasks %Find which agent at which task is able to do the msot so go through active tasks
+        tmp1 = find(tmp{tidx}); %For a given active task see if it contains the highest work value
+        if not(isempty(tmp1)) %If so
+            tmp1 = tmp1(1); %Take only the first (in theory, but hardly in practice, the same mostWork could be done by multiple agents)
+            bestAg = simAgs{tidx}(tmp1); %This agent can do the msot work in the next step
+            t2a(tidx) = bestAg; %Put this agent on the current active task
+            break;
+        end
+    end
+    remTask = tidx;
+    for tidx = activeTasks %Go through remaining tasks again...
+        tmp = simAgs{tidx} == bestAg;
+        simAgs{tidx}(tmp) = []; %to remove the agent that was assigned to the task above from all possible future assignments
+        agFit{tidx}(tmp) = []; %need to remove the removed agent's fitness as well
+    end
+    activeTasks(activeTasks == remTask) = []; %Erase the current activeTask from the activeTasks variable for the next round
+end
